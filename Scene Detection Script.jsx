@@ -1,111 +1,144 @@
-main();
+/*******************************************************************************
+		Name:           scenedetector
+		Desc:           A scene detector.
+        API :           getSplitTimes, detectScenes, setThreshold, setComp,
+                        splitScenes
+		Created:        2109 (YYMM)
+		Modified:       2109 (YYMM)
+*******************************************************************************/
+/******************************************************************************/
 
-function main() {
-    // check for comp
-    if(app.project.activeItem == null || !(app.project.activeItem instanceof CompItem)) {
-        alert("Please select a comp!");
-        return false;
+(function SceneDetection(host, self){
+    
+    //@include "utils.jsx"
+    host[self] = self;
+
+    I = {};
+
+    I.comp = app.project.activeItem;
+    I.THRESHOLD = 102;
+
+    I.isNotComp = function(c){
+        return !(c && c instanceof CompItem);
     }
 
-    var comp = app.project.activeItem;
-    // check for 1 selectedLayer
-    if(comp.selectedLayers.length != 1) {
-        alert("Please select exactly 1 layer to analyse");
-        return false;
-    }
-
-    app.beginUndoGroup("Scene Detection");
-    splitScene(comp, comp.selectedLayers[0]);
-    app.endUndoGroup();
-}
-
-function splitScene(comp, layer) {
-    // adjust me if you're having problems
-    var threshold = 135; 
-    var rText = comp.layers.addText();
-    var gText = comp.layers.addText();
-    var bText = comp.layers.addText();
-
-    rText.property("Source Text").expression = 'targetLayer = thisComp.layer("'+layer.name+'"); samplePoint = [thisComp.width/2, thisComp.height/2]; sampleRadius = [thisComp.width,thisComp.height]; sampledColor_8bpc = 255 * targetLayer.sampleImage(samplePoint, sampleRadius, true, time); R = Math.round(sampledColor_8bpc[0]); text.sourceText = R';
-    gText.property("Source Text").expression = 'targetLayer = thisComp.layer("'+layer.name+'"); samplePoint = [thisComp.width/2, thisComp.height/2]; sampleRadius = [thisComp.width,thisComp.height]; sampledColor_8bpc = 255 * targetLayer.sampleImage(samplePoint, sampleRadius, true, time); R = Math.round(sampledColor_8bpc[1]); text.sourceText = R';
-    bText.property("Source Text").expression = 'targetLayer = thisComp.layer("'+layer.name+'"); samplePoint = [thisComp.width/2, thisComp.height/2]; sampleRadius = [thisComp.width,thisComp.height]; sampledColor_8bpc = 255 * targetLayer.sampleImage(samplePoint, sampleRadius, true, time); R = Math.round(sampledColor_8bpc[2]); text.sourceText = R';
-
-    writeToRGBFile(parseInt(rText.property("Source Text").value), parseInt(gText.property("Source Text").value), parseInt(bText.property("Source Text").value));
-
-    var splitTimes = [];
-
-    comp.time=0;
-    var ogR, ogG, ogB;
-    var r, g, b;
-    var temp = readRGBFile();
-    ogR = temp[0];
-    ogG = temp[1];
-    ogB = temp[2];
-
-    var ogLuma, luma;
-    ogLuma = (ogR+ogG+ogB)/3;
-
-    var frameIncrement = 1;
-    var frameRate = Math.floor(1/comp.frameDuration);
-     for(var i = comp.time*frameRate; i < comp.duration*frameRate; i+=frameIncrement) {
-
-        // move forward in time
-        comp.time+=frameIncrement/frameRate;
+    I.getExpression = function(layerArg, valArg){
         
-        // write new values in file
-        writeToRGBFile(parseInt(rText.property("Source Text").value), parseInt(gText.property("Source Text").value), parseInt(bText.property("Source Text").value));
-
-        temp = readRGBFile();
-        r = temp[0];
-        g = temp[1];
-        b = temp[2];
-
-        luma = (r+g+b)/3;
-        if(ogLuma / luma * 100 > threshold || luma / ogLuma * 100 > threshold) {
-            splitTimes.push(i/frameRate);
-        }
-
-        ogLuma = luma;
-        ogR = r;
-        ogG = g;
-        ogB = b;
-
-     }
-     splitTimes.shift();
-
-     //alert(splitTimes);
-
-    rText.remove();
-    gText.remove();
-    bText.remove();
-
-    var duplicateLayer;
-    for(var i = 0; i < splitTimes.length; i++) {
-        if(i == 0) {
-    duplicateLayer = layer.duplicate();
-    duplicateLayer.outPoint = splitTimes[i];
-        } else {
-    duplicateLayer = layer.duplicate();
-    duplicateLayer.inPoint = splitTimes[i-1];
-    duplicateLayer.outPoint = splitTimes[i];
-        }
+        repConfig  = {
+            $layerName: layerArg.name,
+            $RGBValue: valArg
+        };
+    
+        return (function(){
+        
+            var targetLayer = thisComp.layer("$layerName");
+            var compDimens  = [thisComp.width, thisComp.height]; 
+            
+            var sampledColor_8bpc = 255 * targetLayer.sampleImage(
+            
+                compDimens/2, //samplePoint
+                compDimens,   //sampleRadius
+                true, 
+                time
+            ); 
+            
+            Math.round(sampledColor_8bpc[$RGBValue]);
+        
+        }).body()._replace(repConfig);
     }
 
-    layer.remove();
-}
+    I.addRgbNull = function(layer){
+        
+        var comp      = layer.containingComp;
+        var rgbLayer  = comp.layers.addNull();
+        
+        rgbLayer.addProp("Effects/Slider Control:rSlider").property("Slider").expression = I.getExpression(layer, 0);
+        rgbLayer.addProp("Effects/Slider Control:gSlider").property("Slider").expression = I.getExpression(layer, 1);
+        rgbLayer.addProp("Effects/Slider Control:bSlider").property("Slider").expression = I.getExpression(layer, 2);
+        
+        return rgbLayer;
+    }
 
-function writeToRGBFile(r, g, b) {
-    var rgbFile = File("~/Documents/rgb.txt");
-    rgbFile.open("w");
-    rgbFile.write(r+"\r"+g+"\r"+b);
-    rgbFile.close();
-}
+    I.isFrame = function (OLDVAL, NEWVAL, THRESHOLD)
+    {
+        return (OLDVAL / NEWVAL * 100 > THRESHOLD || OLDVAL / NEWVAL * 100 > THRESHOLD)
+    }
 
-function readRGBFile() {
-    var rgbFile = File("~/Documents/rgb.txt");
-    rgbFile.open("r");
-    var data = rgbFile.read().split("\n");
-    rgbFile.close();
+    self.setComp = function(c){
+        if(I.isNotComp(c)) return;
+        I.comp = c;
+    }
 
-    return data;
-}
+    self.setThreshold = function(nt){
+        I.THRESHOLD = nt;
+    }
+
+    self.getSplitTimes = function(layer)
+    {
+    
+        var comp        = layer.containingComp,
+            frameRate   = Math.floor(1/comp.frameDuration),
+            rgbLayer    = I.addRgbNull(layer);
+    
+        var getLuma = function()
+        {
+            return Math.sum.apply(null, 
+                [
+                    rgbLayer.getProp("Effects/rSlider/Slider").value,
+                    rgbLayer.getProp("Effects/gSlider/Slider").value,
+                    rgbLayer.getProp("Effects/bSlider/Slider").value
+        
+                ]) / 3;
+        }
+    
+        var splitTimes = [];
+        var ogLuma = getLuma(), luma;
+    
+        var timeIncrement  = 1 / frameRate; // 1 = frameIcrement
+    
+        for(;comp.time < comp.duration
+            ;comp.time += timeIncrement)
+        {
+            
+            newLuma = getLuma();
+            if(I.isFrame(ogLuma, newLuma, I.THRESHOLD))
+            {
+                splitTimes.push(comp.time);
+            }
+            ogLuma = newLuma;
+        }
+    
+        rgbLayer.remove();
+        comp.time = 0;
+        return (splitTimes.shift(), splitTimes);
+    }
+
+    self.splitScenes = function DetectScenes(layer, splitTimes, removOg)
+    {
+        var dupLayer, i = 0;
+        dupLayer = layer.duplicate();
+        dupLayer.outPoint = splitTimes[0];
+    
+        for(; ++i <splitTimes.length;) 
+        {
+            dupLayer = layer.duplicate();
+            dupLayer.inPoint  = splitTimes[i-1];
+            dupLayer.outPoint = splitTimes[i];
+        }
+    
+        if(removeOg) layer.remove();
+    }
+
+    self.detectScenes = function(){
+
+        if(I.isNotComp(I.comp))       throw Error("Select A Comp!");
+        if(I.comp.sel().length != 1)  throw Error("Select A Single Layer To Analyse!");
+        
+        app.wrapUndo( /**/ self.splitScenes /**/, // splitScenes function 
+            null, // no context
+            I.comp.sel(0), //layer
+            self.getSplitTimes(myLayer), // split times
+            false //remove original layer
+        )();
+    }
+}($.global, {toString: function(){return "SceneDetection"}}));
