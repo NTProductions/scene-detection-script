@@ -3,6 +3,8 @@
 
 SceneDetection.detectScenes();
 
+// $.writeln(SceneDetection.detectScenes.timeit()); // time the function (in seconds)!
+
 function testSplitTimes(thr){
     
     try{
